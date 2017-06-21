@@ -143,8 +143,10 @@ class WebCrawler(object):
         headers = config_dict['headers']
         self.user_agent = headers['User-Agent']
         self.kwargs['timeout'] = config_dict['default_timeout']
-        self.white_list_host = config_dict['white-list-host']
-        self.white_list_key = config_dict['white-list-key']
+        self.whitelist_host = config_dict['whitelist']['host']
+        self.whitelist_fullurls = config_dict['whitelist']['fullurl']
+        self.whitelist_include_keys = config_dict['whitelist']['include-key']
+        self.whitelist_startswith_strs = config_dict['whitelist']['startswith']
         self.grey_env = False
 
     def set_grey_env(self, user_agent, traceid, view_grey):
@@ -166,21 +168,9 @@ class WebCrawler(object):
         if url == "":
             return None
 
-        if url.startswith('#'):
-            # locator, e.g. #overview
-            return None
-
-        if url.startswith('javascript'):
-            # javascript:void(0);
-            return None
-
-        if url.startswith('mailto'):
-            # mailto:buyenterprise@debugtalk.com
-            return None
-
-        if url.startswith('tel:'):
-            # tel:00852+12345678
-            return None
+        for ignore_url_startswith_str in self.whitelist_startswith_strs:
+            if url.startswith(ignore_url_startswith_str):
+                return None
 
         if url.startswith('\\"'):
             # \\"https:\\/\\/store.debugtalk.com\\/guides\\/"
@@ -188,18 +178,11 @@ class WebCrawler(object):
                 .replace(r'\/', r'/').replace(r'"', r'')
             return url
 
-        if url.startswith('data:'):
-            # data:image/png;base64,iVBORw
-            return None
-
-        if url.startswith('whatsapp://'):
-            # whatsapp://send?text=https://store.XXX
-            return None
-
         parsed_object = helpers.get_parsed_object_from_url(url)
 
-        # remove url fragment
-        parsed_object = parsed_object._replace(fragment='')
+        # remove url query and url fragment
+        parsed_object = parsed_object._replace(query='')._replace(fragment='')
+
         parsed_object = _make_url_by_referer(parsed_object, referer_url)
 
         return parsed_object.geturl()
@@ -262,23 +245,26 @@ class WebCrawler(object):
             "test_counter: {}, depth: {}, url: {}, cookie: {}, status_code: {}, duration_time: {}s"
             .format(self.test_counter, depth, url, self.cookie_str, status_code, round(duration_time, 3)), 'DEBUG')
 
-    def is_url_has_white_list_key(self, url):
-        for key in self.white_list_key:
+    def is_url_has_whitelist_key(self, url):
+        for key in self.whitelist_include_keys:
             if key in url:
                 return True
 
         return False
 
     def get_hyper_links(self, url, depth, retry_times=3):
+        if url in self.whitelist_fullurls:
+            return set()
+
         hyper_links_set = set()
         kwargs = copy.deepcopy(self.kwargs)
         if not self.grey_env:
             kwargs['headers']['User-Agent'] = self.get_user_agent_by_url(url)
         parsed_object = helpers.get_parsed_object_from_url(url)
         url_host = parsed_object.netloc
-        if url_host in self.white_list_host:
+        if url_host in self.whitelist_host:
             return set()
-        if self.is_url_has_white_list_key(url):
+        if self.is_url_has_whitelist_key(url):
             return set()
         if url_host in self.auth_dict and self.auth_dict[url_host]:
             kwargs['auth'] = self.auth_dict[url_host]
